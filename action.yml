@@ -1,0 +1,66 @@
+name: 'SSL/TLS CT Log, SPF/DMARC & Shadow-IT Attack Surface Scanner'
+description: 'Scheduled CI/CD external attack surface scanner for Certificate Transparency subdomains, expired SSL, SPF/DMARC & RDAP.'
+author: 'jesleytassili-glitch'
+
+branding:
+  icon: 'lock'
+  color: 'purple'
+
+inputs:
+  mode:
+    description: 'Audit mode: ct-subdomains | email-dns-security | rdap-whois-recon'
+    required: false
+    default: 'ct-subdomains'
+  targets:
+    description: 'Comma-separated targets (entities, domains, VAT IDs, NCMs, CNPJs) or path to TXT/JSON file.'
+    required: false
+    default: 'github.com,cloudflare.com'
+  rapidapi_key:
+    description: 'RapidAPI Key (@b2bquantapis — BASIC Free 15/mo or PRO $19/mo) for full cloud telemetry.'
+    required: false
+    default: ''
+  apify_token:
+    description: 'Apify API Token (@b2b-quant-apis Pay-Per-Event) for direct cloud dataset execution.'
+    required: false
+    default: ''
+  max_results:
+    description: 'Maximum items to audit per run (1 to 100).'
+    required: false
+    default: '10'
+  fail_on_high_risk:
+    description: 'Exit with code 1 when high-risk hits, invalid VAT IDs, or expired SSL certs are detected.'
+    required: false
+    default: 'false'
+
+outputs:
+  status:
+    description: 'Execution status (completed_cloud | completed_preview | failed_gate)'
+    value: ${{ steps.run_gate.outputs.status }}
+  provider_used:
+    description: 'Execution rail used (rapidapi | apify | zero-key-preview)'
+    value: ${{ steps.run_gate.outputs.provider_used }}
+  records_analyzed:
+    description: 'Total items audited'
+    value: ${{ steps.run_gate.outputs.records_analyzed }}
+  high_risk_count:
+    description: 'High-risk findings flagged'
+    value: ${{ steps.run_gate.outputs.high_risk_count }}
+  report_json_path:
+    description: 'Path to structured JSON compliance report'
+    value: ${{ steps.run_gate.outputs.report_json_path }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Execute B2B Compliance Gate
+      id: run_gate
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_TARGETS: ${{ inputs.targets }}
+        INPUT_RAPIDAPI_KEY: ${{ inputs.rapidapi_key }}
+        INPUT_APIFY_TOKEN: ${{ inputs.apify_token }}
+        INPUT_MAX_RESULTS: ${{ inputs.max_results }}
+        INPUT_FAIL_ON_HIGH_RISK: ${{ inputs.fail_on_high_risk }}
+      run: |
+        python3 "${{ github.action_path }}/src/runner.py"
