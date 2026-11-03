@@ -63,10 +63,24 @@ def parse_max_results(raw: str | None, default: int = 10) -> int:
         return default
 
 
+def _safe_float(val: Any, default: float = 0.0) -> float:
+    try:
+        return float(val) if val is not None and val != "" else default
+    except (ValueError, TypeError):
+        return default
+
+
 def parse_targets(raw: str | None) -> list[str]:
     text = str(raw or "").strip()
     if not text:
         text = DEFAULT_TARGETS
+    if text.startswith("["):
+        try:
+            arr = json.loads(text)
+            if isinstance(arr, list):
+                return [str(x).strip() for x in arr if str(x).strip()][:100]
+        except Exception:
+            pass
     p = Path(text)
     if len(text) < 240 and p.is_file():
         try:
@@ -83,17 +97,66 @@ def parse_targets(raw: str | None) -> list[str]:
 
 
 def build_payload(mode: str, targets: list[str], max_results: int) -> dict[str, Any]:
+    """Constrói payload 100% aderente ao `.actor/input_schema.json` oficial de cada Ator."""
     meta = MODES.get(mode) or MODES[DEFAULT_MODE]
+    slug = meta["slug"]
+    cleaned_domains = [
+        t.lower().replace("https://", "").replace("http://", "").split("/")[0].strip()
+        for t in targets
+        if t and t.strip()
+    ]
+    if slug == "global-sanctions-pep-interpol-watchlist-screener":
+        return {
+            "entityName": targets[0] if targets else "Acme Global Trading Ltd",
+            "entityType": "ANY",
+            "maxResults": max_results,
+        }
+    if slug == "global-gleif-lei-corporate-ownership-kyb":
+        return {
+            "companyName": targets[0] if targets else "Siemens AG",
+            "countryCode": "",
+            "maxResults": max_results,
+        }
+    if slug == "b2b-ssl-tls-ct-log-subdomain-attack-surface-auditor":
+        return {
+            "rootDomain": cleaned_domains[0] if cleaned_domains else "github.com",
+            "excludeExpired": False,
+            "maxResults": max_results,
+        }
+    if slug == "global-b2b-email-domain-security-auditor":
+        return {
+            "targets": cleaned_domains or ["github.com"],
+            "checkDmarcAndSpf": True,
+        }
+    if slug == "icann-rdap-domain-whois-brand-recon":
+        return {
+            "domains": ",".join(cleaned_domains or ["github.com"]),
+            "maxResults": max_results,
+        }
+    if slug == "eu-vies-vat-tax-compliance-auditor":
+        cleaned_vats = [re.sub(r"[^A-Za-z0-9]", "", t).upper() for t in targets if t and t.strip()]
+        return {
+            "vatNumbers": ", ".join(cleaned_vats or ["IE6388047V"]),
+            "requesterCountryCode": "DE",
+            "maxResults": max_results,
+        }
+    if slug == "brazil-tax-reform-ncm-classtrib-auditor":
+        catalog_items = [
+            {
+                "sku": f"ITEM-{idx:03d}",
+                "ncm": (re.sub(r"\D", "", t)[:8] or "84713012"),
+                "description": f"Audited B2B NCM {t}",
+            }
+            for idx, t in enumerate(targets[:max_results], start=1)
+        ]
+        return {"catalogItems": catalog_items, "uf": "SP"}
+    if slug == "brazil-b2b-cnpj-qsa-lead-enricher":
+        return {
+            "cnpjs": targets[:max_results] or ["00000000000191"],
+            "includeSecondaryCnaes": True,
+            "maxResults": max_results,
+        }
     pkey = meta["payload_key"]
-    if pkey == "domains":
-        cleaned = [t.lower().replace("https://", "").replace("http://", "").split("/")[0] for t in targets]
-        return {pkey: cleaned, "maxResults": max_results}
-    if pkey == "vatNumbers":
-        cleaned = [re.sub(r"[^A-Za-z0-9]", "", t).upper() for t in targets]
-        return {pkey: cleaned, "maxResults": max_results}
-    if pkey == "ncmCodes":
-        items = [{"ncm": re.sub(r"\D", "", t)[:8] or "84713012", "cClassTrib": "010001", "valor_item": 1000.0} for t in targets]
-        return {"items": items, "maxResults": max_results}
     return {pkey: targets, "maxResults": max_results}
 
 
@@ -136,7 +199,7 @@ def evaluate_risk(raw_resp: Any) -> tuple[list[dict[str, Any]], int]:
             or rec.get("matchFound") is True
             or rec.get("valid") is False
             or rec.get("expiredCertificate") is True
-            or float(rec.get("riskScore") or 0) >= 75.0
+            or _safe_float(rec.get("riskScore") or rec.get("sanctionsRiskScore") or rec.get("attackSurfaceScore")) >= 75.0
         ):
             high_risk += 1
     return records, high_risk
@@ -243,7 +306,7 @@ def execute_gate(env: dict[str, str] | None = None) -> tuple[int, dict[str, Any]
         md_lines.extend([
             "",
             "---",
-            f"⚡ **Upgrade to Live Cloud Data:** [Subscribe on RapidAPI (`BASIC Free` / `PRO $19/mo`)](https://rapidapi.com/b2bquantapis/api/{slug}) • [Apify Store (`Pay-Per-Event`)](https://apify.com/b2b-quant-apis/{slug}) • `pip install git+https://github.com/jesleytassili-glitch/b2b-compliance-python-sdk.git`",
+            f"⚡ **Upgrade to Live Cloud Data:** [Subscribe on RapidAPI (`BASIC Free` / `PRO $19/mo`)](https://rapidapi.com/b2bquantapis/api/{slug}) • [Apify Store (`Pay-Per-Event`)](https://apify.com/b2b-quant-apis/{slug}) • `pip install b2b-compliance-sdk` • `npx -y b2b-compliance-mcp-cli`",
         ])
 
     summary_md = "\n".join(md_lines) + "\n"
